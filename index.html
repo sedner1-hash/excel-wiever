@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excel Prohlížeč & Simulovaný Archiv</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- SheetJS (xlsx.full.min.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    /* Styly pro scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    .drag-active {
+      border-color: #3b82f6 !important;
+      background-color: #eff6ff !important;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans">
+
+  <!-- Navigace / Hlavička -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="p-2 bg-emerald-600 text-white rounded-lg shadow-sm">
+          <i data-lucide="file-spreadsheet" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold text-slate-900 leading-tight">Excel Prohlížeč</h1>
+          <p class="text-xs text-slate-500">Se simulovanou klientskou archivací</p>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-2">
+        <button id="btnLoadDemo" class="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-medium transition flex items-center gap-1.5 border border-slate-200">
+          <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500"></i>
+          Načíst ukázková data
+        </button>
+        <span id="activeFileBadge" class="hidden text-xs px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full font-medium flex items-center gap-1.5">
+          <i data-lucide="check-circle" class="w-3.5 h-3.5"></i>
+          <span id="activeFileName">data.xlsx</span>
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hlavní kontejner -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full flex flex-col gap-5">
+
+    <!-- Sekce nastavení zdroje dat -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+      <h2 class="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
+        <i data-lucide="database" class="w-4 h-4 text-emerald-600"></i>
+        Zdroj dat Excel
+      </h2>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+        <!-- URL Vstup -->
+        <div class="lg:col-span-7 flex flex-col justify-between space-y-3">
+          <div>
+            <label for="excelUrl" class="block text-xs font-semibold text-slate-600 mb-1">
+              URL adresa Excel souboru (SharePoint / Web / Direct link):
+            </label>
+            <div class="flex gap-2">
+              <div class="relative flex-1">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <i data-lucide="link" class="w-4 h-4"></i>
+                </div>
+                <input 
+                  type="url" 
+                  id="excelUrl" 
+                  placeholder="https://example.com/data.xlsx nebo přímý odkaz ze SharePointu" 
+                  class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                />
+              </div>
+              <button 
+                id="btnFetchUrl" 
+                class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-medium rounded-lg shadow-sm transition flex items-center gap-1.5 shrink-0"
+              >
+                <i data-lucide="refresh-cw" class="w-4 h-4" id="iconFetch"></i>
+                <span>Načíst / Obnovit data</span>
+              </button>
+            </div>
+            <p class="text-xs text-slate-400 mt-1.5">
+              💡 Pokud URL selže kvůli <strong>CORS zabezpečení serveru</strong>, soubor stáhněte a přetáhněte do pole vpravo.
+            </p>
+          </div>
+
+          <!-- Informační chybové / stavové hlášení -->
+          <div id="statusMessage" class="hidden text-xs p-3 rounded-lg flex items-start gap-2">
+            <i data-lucide="alert-circle" class="w-4 h-4 mt-0.5 shrink-0"></i>
+            <span id="statusText"></span>
+          </div>
+        </div>
+
+        <!-- Oddělovač pro mobil -->
+        <div class="lg:hidden relative flex py-1 items-center">
+          <div class="flex-grow border-t border-slate-200"></div>
+          <span class="flex-shrink mx-3 text-xs text-slate-400 font-semibold uppercase">NEBO</span>
+          <div class="flex-grow border-t border-slate-200"></div>
+        </div>
+
+        <!-- Drag & Drop / Lokální soubor -->
+        <div class="lg:col-span-5">
+          <div 
+            id="dropZone" 
+            class="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-4 h-full flex flex-col items-center justify-center text-center cursor-pointer transition bg-slate-50/50 hover:bg-emerald-50/20 group"
+          >
+            <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" class="hidden" />
+            <div class="p-2.5 rounded-full bg-white shadow-sm border border-slate-200 group-hover:border-emerald-300 group-hover:scale-105 transition mb-2">
+              <i data-lucide="upload-cloud" class="w-5 h-5 text-emerald-600"></i>
+            </div>
+            <p class="text-xs font-semibold text-slate-700">Přetáhněte sem soubor .xlsx nebo <span class="text-emerald-600 underline">vyberte z disku</span></p>
+            <p class="text-[11px] text-slate-400 mt-0.5">Podpora formátů .xlsx, .xls, .csv</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ovládací lišta tabulky (Filtry, záložky, akce) -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3">
+      
+      <!-- Záložky: Aktivní vs Archivované -->
+      <div class="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+        <button 
+          id="tabActive" 
+          class="px-3.5 py-1.5 rounded-md text-xs font-semibold transition flex items-center gap-2 bg-white text-slate-800 shadow-sm"
+        >
+          <i data-lucide="table-properties" class="w-3.5 h-3.5 text-emerald-600"></i>
+          Aktivní řádky
+          <span id="badgeActiveCount" class="bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded-full text-[10px]">0</span>
+        </button>
+        <button 
+          id="tabArchived" 
+          class="px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-600 hover:text-slate-900 transition flex items-center gap-2"
+        >
+          <i data-lucide="archive" class="w-3.5 h-3.5 text-amber-600"></i>
+          Skryté / Archivované
+          <span id="badgeArchivedCount" class="bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded-full text-[10px]">0</span>
+        </button>
+      </div>
+
+      <!-- Vyhledávací pole -->
+      <div class="flex-1 min-w-[240px] max-w-md relative">
+        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+          <i data-lucide="search" class="w-4 h-4"></i>
+        </div>
+        <input 
+          type="text" 
+          id="searchInput" 
+          placeholder="Vyhledat v řádcích..." 
+          class="w-full pl-9 pr-8 py-1.5 text-xs sm:text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white"
+        />
+        <button id="btnClearSearch" class="hidden absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+
+      <!-- Akční tlačítka -->
+      <div class="flex items-center gap-2">
+        <button 
+          id="btnRestoreAll" 
+          title="Vrátit všechny skryté řádky zpět do hlavní tabulky"
+          class="px-3 py-1.5 text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg transition flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+          disabled
+        >
+          <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+          <span>Obnovit vše</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Zobrazení tabulky -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col flex-1 min-h-[350px]">
+      
+      <!-- Informační panel tabulky -->
+      <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs text-slate-500 flex justify-between items-center">
+        <div id="tableSummary">Žádná data nejsou načtena.</div>
+        <div class="text-[11px] text-slate-400 flex items-center gap-1">
+          <i data-lucide="hard-drive" class="w-3 h-3"></i>
+          Uloženo v localStorage prohlížeče
+        </div>
+      </div>
+
+      <!-- Samotný kontejner tabulky s posuvníkem -->
+      <div class="overflow-x-auto overflow-y-auto flex-1 max-h-[600px] relative">
+        <table id="dataTable" class="w-full text-left border-collapse text-xs sm:text-sm">
+          <thead id="tableHead" class="bg-slate-100 text-slate-700 sticky top-0 z-10 shadow-[0_1px_2px_rgba(0,0,0,0.05)] font-semibold border-b border-slate-200">
+            <!-- Dynamicky generovaná záhlaví -->
+          </thead>
+          <tbody id="tableBody" class="divide-y divide-slate-100">
+            <!-- Prázdný stav -->
+            <tr>
+              <td colspan="100%" class="py-16 text-center text-slate-400">
+                <i data-lucide="file-spreadsheet" class="w-12 h-12 mx-auto mb-3 text-slate-300 stroke-[1.5]"></i>
+                <p class="text-sm font-medium text-slate-600">Zatím nebyl načten žádný sešit</p>
+                <p class="text-xs text-slate-400 mt-1">Zadejte URL adresu, nahrajte soubor nebo načtěte ukázková data.</p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Zápatí -->
+  <footer class="bg-white border-t border-slate-200 py-3 text-center text-xs text-slate-400">
+    Čistě klientská webová aplikace bez backendu • Původní Excel soubory nejsou modifikovány.
+  </footer>
+
+  <!-- Toast notifikace -->
+  <div id="toast" class="fixed bottom-5 right-5 bg-slate-900 text-white px-4 py-2.5 rounded-lg shadow-xl text-xs flex items-center gap-2 transform transition-all duration-300 translate-y-20 opacity-0 pointer-events-none z-50">
+    <i data-lucide="info" class="w-4 h-4 text-emerald-400" id="toastIcon"></i>
+    <span id="toastMsg">Notifikace</span>
+  </div>
+
+  <script>
+    // Inicializace Lucide ikon
+    lucide.createIcons();
+
+    // Konstanty a stav aplikace
+    const STORAGE_KEY_PREFIX = 'excel_viewer_archived_';
+    let currentFileKey = 'default_sheet';
+    let rawHeaders = [];
+    let rawRows = []; // Pole objektů { __id: 'hash_or_index', data: [...] }
+    let archivedIds = new Set();
+    let currentTab = 'active'; // 'active' | 'archived'
+    let searchQuery = '';
+
+    // DOM elementy
+    const excelUrlInput = document.getElementById('excelUrl');
+    const btnFetchUrl = document.getElementById('btnFetchUrl');
+    const iconFetch = document.getElementById('iconFetch');
+    const fileInput = document.getElementById('fileInput');
+    const dropZone = document.getElementById('dropZone');
+    const btnLoadDemo = document.getElementById('btnLoadDemo');
+    const activeFileBadge = document.getElementById('activeFileBadge');
+    const activeFileName = document.getElementById('activeFileName');
+    const statusMessage = document.getElementById('statusMessage');
+    const statusText = document.getElementById('statusText');
+
+    const tabActive = document.getElementById('tabActive');
+    const tabArchived = document.getElementById('tabArchived');
+    const badgeActiveCount = document.getElementById('badgeActiveCount');
+    const badgeArchivedCount = document.getElementById('badgeArchivedCount');
+    const searchInput = document.getElementById('searchInput');
+    const btnClearSearch = document.getElementById('btnClearSearch');
+    const btnRestoreAll = document.getElementById('btnRestoreAll');
+    
+    const dataTable = document.getElementById('dataTable');
+    const tableHead = document.getElementById('tableHead');
+    const tableBody = document.getElementById('tableBody');
+    const tableSummary = document.getElementById('tableSummary');
+
+    // Inicializace z localStorage uložené URL
+    const savedUrl = localStorage.getItem('excel_viewer_last_url');
+    if (savedUrl) {
+      excelUrlInput.value = savedUrl;
+    }
+
+    // Pomocná funkce pro Toast
+    function showToast(msg, isSuccess = true) {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toastMsg');
+      const toastIcon = document.getElementById('toastIcon');
+      
+      toastMsg.textContent = msg;
+      toastIcon.setAttribute('data-lucide', isSuccess ? 'check-circle' : 'alert-circle');
+      toastIcon.className = `w-4 h-4 ${isSuccess ? 'text-emerald-400' : 'text-amber-400'}`;
+      lucide.createIcons();
+
+      toast.classList.remove('translate-y-20', 'opacity-0', 'pointer-events-none');
+      setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0', 'pointer-events-none');
+      }, 3000);
+    }
+
+    // Zobrazení status banneru
+    function showStatus(text, type = 'error') {
+      statusMessage.classList.remove('hidden', 'bg-red-50', 'text-red-700', 'border-red-200', 'bg-blue-50', 'text-blue-700', 'border-blue-200');
+      if (type === 'error') {
+        statusMessage.classList.add('bg-red-50', 'text-red-700', 'border', 'border-red-200');
+      } else {
+        statusMessage.classList.add('bg-blue-50', 'text-blue-700', 'border', 'border-blue-200');
+      }
+      statusText.innerHTML = text;
+      lucide.createIcons();
+    }
+
+    function clearStatus() {
+      statusMessage.classList.add('hidden');
+    }
+
+    // Výpočet identifikátoru řádku (Row ID)
+    // Abychom zachovali skrytí i po refreshi, řádek identifikujeme unikátně: buď primárním klíčem nebo hashem obsahu
+    function generateRowId(rowValues, rowIndex) {
+      // Vytvoříme stabilní řetězec z obsahu
+      const contentStr = rowValues.map(v => (v !== null && v !== undefined ? String(v).trim() : '')).join('|||');
+      let hash = 0;
+      for (let i = 0; i < contentStr.length; i++) {
+        hash = (hash << 5) - hash + contentStr.charCodeAt(i);
+        hash |= 0;
+      }
+      return `row_${rowIndex}_${Math.abs(hash)}`;
+    }
+
+    // Správa localStorage pro archivované řádky
+    function loadArchivedIds(fileKey) {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY_PREFIX + fileKey);
+        if (stored) {
+          archivedIds = new Set(JSON.parse(stored));
+        } else {
+          archivedIds = new Set();
+        }
+      } catch (e) {
+        console.error('Chyba při čtení z localStorage:', e);
+        archivedIds = new Set();
+      }
+    }
+
+    function saveArchivedIds() {
+      try {
+        localStorage.setItem(STORAGE_KEY_PREFIX + currentFileKey, JSON.stringify(Array.from(archivedIds)));
+      } catch (e) {
+        console.error('Chyba při ukládání do localStorage:', e);
+      }
+    }
+
+    // Zpracování dat z načteného Workbooku (SheetJS)
+    function processWorkbook(workbook, fileName = 'Neznámý soubor') {
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        showStatus('Soubor neobsahuje žádný list.', 'error');
+        return;
+      }
+
+      const worksheet = workbook.Sheets[firstSheetName];
+      // Převedeme na matici polí (2D array)
+      const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+      if (!data || data.length === 0) {
+        showStatus('List "' + firstSheetName + '" je prázdný.', 'error');
+        return;
+      }
+
+      // Nastavení File Key pro ukládání do localStorage (odstraníme speciální znaky)
+      currentFileKey = fileName.replace(/[^a-zA-Z0-9_-]/g, '_');
+      loadArchivedIds(currentFileKey);
+
+      // 1. řádek jsou záhlaví, ostatní jsou data
+      rawHeaders = data[0].map(h => (h !== undefined && h !== null && String(h).trim() !== '' ? String(h) : 'Sloupec'));
+      
+      const contentRows = data.slice(1).filter(r => r.some(cell => cell !== '' && cell !== null && cell !== undefined));
+
+      rawRows = contentRows.map((rowArr, idx) => {
+        // Zajistíme stejnou délku jako má hlavička
+        const normalized = rawHeaders.map((_, colIdx) => rowArr[colIdx] !== undefined ? rowArr[colIdx] : '');
+        return {
+          __id: generateRowId(normalized, idx),
+          data: normalized
+        };
+      });
+
+      // Aktualizace odznaku souboru
+      activeFileName.textContent = `${fileName} (${firstSheetName})`;
+      activeFileBadge.classList.remove('hidden');
+      clearStatus();
+
+      renderTable();
+      showToast(`Úspěšně načteno ${rawRows.length} řádků.`);
+    }
+
+    // Filtrování a vykreslení tabulky
+    function renderTable() {
+      if (rawRows.length === 0) {
+        tableHead.innerHTML = '';
+        tableBody.innerHTML = `
+          <tr>
+            <td colspan="100%" class="py-16 text-center text-slate-400">
+              <i data-lucide="file-spreadsheet" class="w-12 h-12 mx-auto mb-3 text-slate-300 stroke-[1.5]"></i>
+              <p class="text-sm font-medium text-slate-600">Žádná data k zobrazení</p>
+            </td>
+          </tr>
+        `;
+        badgeActiveCount.textContent = '0';
+        badgeArchivedCount.textContent = '0';
+        tableSummary.textContent = '0 položek';
+        btnRestoreAll.disabled = true;
+        lucide.createIcons();
+        return;
+      }
+
+      // Rozdělení na aktivní a archivované
+      const activeRows = rawRows.filter(r => !archivedIds.has(r.__id));
+      const archivedRows = rawRows.filter(r => archivedIds.has(r.__id));
+
+      badgeActiveCount.textContent = activeRows.length;
+      badgeArchivedCount.textContent = archivedRows.length;
+      btnRestoreAll.disabled = archivedRows.length === 0;
+
+      // Zvolené zobrazení
+      const sourceList = currentTab === 'active' ? activeRows : archivedRows;
+
+      // Fulltext filtr podle vyhledávání
+      const query = searchQuery.toLowerCase().trim();
+      const filteredRows = query 
+        ? sourceList.filter(r => r.data.some(val => String(val).toLowerCase().includes(query)))
+        : sourceList;
+
+      tableSummary.textContent = `Zobrazeno ${filteredRows.length} z ${sourceList.length} položek v sekci "${currentTab === 'active' ? 'Aktivní' : 'Archivované'}" (celkem ${rawRows.length})`;
+
+      // Vykreslení záhlaví tabulky
+      let theadHtml = `
+        <tr>
+          <th class="py-2.5 px-3 text-center w-24 bg-slate-100 border-r border-slate-200">Akce</th>
+          <th class="py-2.5 px-3 text-center w-12 text-slate-400 font-normal">#</th>
+      `;
+      rawHeaders.forEach(col => {
+        theadHtml += `<th class="py-2.5 px-4 font-semibold text-slate-700 whitespace-nowrap">${escapeHtml(col)}</th>`;
+      });
+      theadHtml += '</tr>';
+      tableHead.innerHTML = theadHtml;
+
+      // Vykreslení řádků
+      if (filteredRows.length === 0) {
+        tableBody.innerHTML = `
+          <tr>
+            <td colspan="${rawHeaders.length + 2}" class="py-12 text-center text-slate-400">
+              <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+              <p class="font-medium text-slate-600">V této kategorii nejsou žádné položky</p>
+              ${query ? '<p class="text-xs text-slate-400 mt-1">Zkuste upravit vyhledávací dotaz.</p>' : ''}
+            </td>
+          </tr>
+        `;
+      } else {
+        let tbodyHtml = '';
+        filteredRows.forEach((rowObj, index) => {
+          const isArchived = archivedIds.has(rowObj.__id);
+          tbodyHtml += `
+            <tr class="hover:bg-slate-50 transition border-b border-slate-100 group">
+              <!-- Sloupec Akce -->
+              <td class="py-2 px-3 text-center border-r border-slate-100 whitespace-nowrap">
+                ${!isArchived ? `
+                  <button 
+                    onclick="archiveRow('${rowObj.__id}')" 
+                    title="Skrýt / Archivovat řádek" 
+                    class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-red-700 bg-slate-100 hover:bg-red-50 rounded border border-slate-200 hover:border-red-200 transition"
+                  >
+                    <i data-lucide="archive" class="w-3.5 h-3.5 text-slate-500 group-hover:text-red-600"></i>
+                    <span>Skrýt</span>
+                  </button>
+                ` : `
+                  <button 
+                    onclick="restoreRow('${rowObj.__id}')" 
+                    title="Vrátit řádek zpět do tabulky" 
+                    class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-200 transition"
+                  >
+                    <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 text-emerald-600"></i>
+                    <span>Vrátit</span>
+                  </button>
+                `}
+              </td>
+              <!-- Pořadové číslo -->
+              <td class="py-2 px-3 text-center text-xs text-slate-400 font-mono">
+                ${index + 1}
+              </td>
+              <!-- Hodnoty buněk -->
+              ${rowObj.data.map(val => {
+                const text = String(val);
+                return `<td class="py-2 px-4 whitespace-nowrap text-slate-700">${escapeHtml(text)}</td>`;
+              }).join('')}
+            </tr>
+          `;
+        });
+        tableBody.innerHTML = tbodyHtml;
+      }
+
+      lucide.createIcons();
+    }
+
+    // Escape HTML znaků pro bezpečnost
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Akce: Archivovat řádek
+    window.archiveRow = function(id) {
+      archivedIds.add(id);
+      saveArchivedIds();
+      renderTable();
+      showToast('Řádek byl skryt.');
+    };
+
+    // Akce: Obnovit řádek
+    window.restoreRow = function(id) {
+      archivedIds.delete(id);
+      saveArchivedIds();
+      renderTable();
+      showToast('Řádek byl obnoven do tabulky.');
+    };
+
+    // Obnovit všechny skryté řádky
+    btnRestoreAll.addEventListener('click', () => {
+      if (archivedIds.size === 0) return;
+      if (confirm(`Opravdu chcete obnovit všech ${archivedIds.size} skrytých řádků?`)) {
+        archivedIds.clear();
+        saveArchivedIds();
+        renderTable();
+        showToast('Všechny řádky byly úspěšně obnoveny.');
+      }
+    });
+
+    // Přepínání záložek
+    tabActive.addEventListener('click', () => {
+      currentTab = 'active';
+      tabActive.className = 'px-3.5 py-1.5 rounded-md text-xs font-semibold transition flex items-center gap-2 bg-white text-slate-800 shadow-sm';
+      tabArchived.className = 'px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-600 hover:text-slate-900 transition flex items-center gap-2';
+      renderTable();
+    });
+
+    tabArchived.addEventListener('click', () => {
+      currentTab = 'archived';
+      tabArchived.className = 'px-3.5 py-1.5 rounded-md text-xs font-semibold transition flex items-center gap-2 bg-white text-slate-800 shadow-sm';
+      tabActive.className = 'px-3.5 py-1.5 rounded-md text-xs font-semibold text-slate-600 hover:text-slate-900 transition flex items-center gap-2';
+      renderTable();
+    });
+
+    // Vyhledávání
+    searchInput.addEventListener('input', (e) => {
+      searchQuery = e.target.value;
+      btnClearSearch.classList.toggle('hidden', searchQuery === '');
+      renderTable();
+    });
+
+    btnClearSearch.addEventListener('click', () => {
+      searchInput.value = '';
+      searchQuery = '';
+      btnClearSearch.classList.add('hidden');
+      renderTable();
+    });
+
+    // Načtení z URL
+    async function loadFromUrl(url) {
+      if (!url) {
+        showStatus('Zadejte prosím platnou URL adresu.', 'error');
+        return;
+      }
+
+      clearStatus();
+      btnFetchUrl.disabled = true;
+      iconFetch.classList.add('animate-spin');
+
+      try {
+        localStorage.setItem('excel_viewer_last_url', url);
+        
+        // Získání souboru přes fetch s arrayBuffer
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Server vrátil stav ${response.status} (${response.statusText})`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        
+        // Odvození názvu souboru z URL
+        let derivedName = 'web_data.xlsx';
+        try {
+          const parsed = new URL(url);
+          const pathname = parsed.pathname;
+          const fileNamePart = pathname.substring(pathname.lastIndexOf('/') + 1);
+          if (fileNamePart) derivedName = decodeURIComponent(fileNamePart);
+        } catch (_) {}
+
+        processWorkbook(workbook, derivedName);
+      } catch (err) {
+        console.error('Chyba při stahování:', err);
+        showStatus(
+          `<strong>Chyba při načítání souboru:</strong> ${err.message}.<br/>` +
+          `Pokud je příčinou <em>CORS omezení</em> serveru (např. SharePoint nebo firemní intranet), soubor jednoduše stáhněte do počítače a přetáhněte do rámečku vpravo.`,
+          'error'
+        );
+      } finally {
+        btnFetchUrl.disabled = false;
+        iconFetch.classList.remove('animate-spin');
+      }
+    }
+
+    btnFetchUrl.addEventListener('click', () => {
+      loadFromUrl(excelUrlInput.value.trim());
+    });
+
+    excelUrlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        loadFromUrl(excelUrlInput.value.trim());
+      }
+    });
+
+    // Načtení z lokálního souboru
+    function handleFile(file) {
+      if (!file) return;
+      clearStatus();
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          processWorkbook(workbook, file.name);
+        } catch (err) {
+          console.error(err);
+          showStatus('Nepodařilo se přečíst soubor. Ujistěte se, že jde o platný formát .xlsx, .xls nebo .csv.', 'error');
+        }
+      };
+      reader.onerror = function() {
+        showStatus('Chyba při čtení souboru z disku.', 'error');
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleFile(e.target.files[0]);
+      }
+    });
+
+    dropZone.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    // Drag & Drop obsluha
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('drag-active');
+      }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-active');
+      }, false);
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      const files = dt.files;
+      if (files.length > 0) {
+        handleFile(files[0]);
+      }
+    });
+
+    // Generátor ukázkových dat (Demo)
+    btnLoadDemo.addEventListener('click', () => {
+      clearStatus();
+      
+      const demoData = [
+        ['ID', 'Objednávka', 'Zákazník', 'Město', 'Datum', 'Částka (Kč)', 'Stav'],
+        ['1001', 'OBJ-2026-001', 'Petr Novák', 'Praha', '2026-10-12', '12 500', 'Vyřízeno'],
+        ['1002', 'OBJ-2026-002', 'Jana Dvořáková', 'Brno', '2026-10-14', '3 450', 'Čeká na platbu'],
+        ['1003', 'OBJ-2026-003', 'Auto Servis s.r.o.', 'Plzeň', '2026-10-15', '45 800', 'Odesláno'],
+        ['1004', 'OBJ-2026-004', 'Martin Kučera', 'Ostrava', '2026-10-16', '1 200', 'Stornováno'],
+        ['1005', 'OBJ-2026-005', 'Elena Kováčová', 'Olomouc', '2026-10-18', '8 900', 'Vyřízeno'],
+        ['1006', 'OBJ-2026-006', 'TechCorp s.r.o.', 'Praha', '2026-10-20', '124 000', 'Zpracovává se'],
+        ['1007', 'OBJ-2026-007', 'Lucie Černá', 'Liberec', '2026-10-21', '6 300', 'Odesláno'],
+        ['1008', 'OBJ-2026-008', 'Pavel Veselý', 'Hradec Králové', '2026-10-22', '15 400', 'Čeká na platbu']
+      ];
+
+      // Vytvoříme in-memory sešit přes SheetJS
+      const ws = XLSX.utils.aoa_to_sheet(demoData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Přehled objednávek");
+
+      processWorkbook(wb, 'Ukazkova_data_2026.xlsx');
+    });
+
+  </script>
+</body>
+</html>
